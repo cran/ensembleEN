@@ -1,7 +1,7 @@
 library(glmnet)
 library(ensembleEN)
 library(MASS)
-context("Compare coefficients at output with glmnet for lambda_int = 0")
+context("Compare coefficients at output with glmnet for lambda_D = 0")
 # Generate data sets, one with p<n, the other with p>n
 set.seed(1)
 n <- 100
@@ -49,7 +49,7 @@ for(alpha in alphas){
     error <- (coef_glmnet - coef_phalanx)^2
     
     
-    expect_true(max(error) < 1e-4)
+    expect_lte(max(error), 1e-4)
   })
   
   
@@ -69,6 +69,6 @@ for(alpha in alphas){
     error <- (coef_glmnet - coef_phalanx)^2
     
     
-    expect_true(max(error) < 1e-4)
+    expect_lte(max(error), 1e-4)
   })
 }

@@ -5,7 +5,7 @@
 \title{Ensembles of elastic net algorithm with a sparsity and diversity penalty.}
 \usage{
 cv.ensembleEN(x, y, num_lambdas_sparsity = 100, num_lambdas_diversity = 100,
-  alpha = 1, num_models = 10, tolerance = 1e-07, max_iter = 1e+05,
+  alpha = 1, num_models = 10, tolerance = 1e-08, max_iter = 1e+05,
   num_folds = 10, num_threads = 1)
 }
 \arguments{
@@ -38,7 +38,7 @@ An object of class cv.ensembleEN, a list with entries
 \item{lambda_diversity_opt}{Optimal penalty parameter for diversity.}
 \item{lambdas_sparsity}{Grid of sparsity parameters.}
 \item{lambdas_diversity}{Grid of diversity parameters.}
-\item{cv_opt}{Optimal CV MSE.}
+\item{cv_mse_opt}{Optimal CV MSE.}
 \item{call}{The matched call.}
 }
 \description{
@@ -68,7 +68,7 @@ Sigma <- matrix(0.5, 50, 50)
 diag(Sigma) <- 1
 x <- mvrnorm(50, mu = rep(0, 50), Sigma = Sigma)
 y <- x \%*\% beta + rnorm(50)
-fit <- cv.ensembleEN(x, y, num_models=10)
+fit <- cv.ensembleEN(x, y, num_models=2)
 coefs <- predict(fit, type="coefficients")
 
 }

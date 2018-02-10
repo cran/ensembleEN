@@ -49,7 +49,7 @@ arma::mat beta_weights(const arma::mat & beta,
                        const arma::uword & group){
   // Computes weights for the l1 interaction penalty term
   arma::uword num_groups = beta.n_cols;
-  arma::mat sum_abs = zeros(beta.n_cols, 1);
+  arma::mat sum_abs = zeros(beta.n_rows, 1);
   arma::vec indices = ones(num_groups, 1);
   indices[group] = 0;
   sum_abs = abs(beta) * indices;
@@ -64,9 +64,9 @@ double EN_penalty(const arma::mat & beta,
   return(penalty);
 }
 
-double Objective_Penalty(const arma::mat & beta,
-                       const double & lambda_diversity){
-  // Function to compute the objective function penalty
+double Diversity_Penalty(const arma::mat & beta,
+                         const double & lambda_diversity){
+  // Function to compute the diversity penalty
   double penalty = 0;
   arma::mat gram_beta = zeros(beta.n_rows, beta.n_rows);
   gram_beta = abs(beta.t()) * abs(beta);
@@ -85,25 +85,28 @@ double Ensemble_EN_Objective(const arma::mat & current_res,
   // Compute the Ensemble EN objective function
   double n = current_res.n_rows;
   arma::mat squared_res = square(current_res);
-  double loss = accu(squared_res) / (2 * n);
+  double loss = accu(squared_res / (2 * n));
   double EN_pen = EN_penalty(beta, lambda_sparsity, alpha);
-  double ensemble_EN_pen = Objective_Penalty(beta, lambda_diversity);
+  double ensemble_EN_pen = Diversity_Penalty(beta, lambda_diversity);
   double objective = loss + EN_pen + ensemble_EN_pen;
   return objective;
 }
 
-arma::mat Prediction_Grid(const arma::mat & x_test,
-                       const arma::mat & x_train,
-                       const arma::vec & y_train,
-                       const arma::cube & grid_betas){
+// [[Rcpp::export]]
+arma::cube Prediction_Grid(const arma::mat & x_test,
+                           const arma::mat & x_train,
+                           const arma::vec & y_train,
+                           const arma::cube & grid_betas){
   // Function that returns predictions from a sequence of betas (coefficients)
   arma::uword n = x_test.n_rows;
   arma::uword len_grid = grid_betas.n_slices;
-  arma::mat predictions = zeros(n, len_grid);
+  arma::uword num_models = grid_betas.n_cols;
+  arma::cube predictions = zeros(n, num_models, len_grid);
   arma::rowvec mu_x = mean(x_train);
   double mu_y = mean(y_train);
   for(arma::uword i = 0; i < len_grid; i++){
-    predictions.col(i) =  mu_y - mean(mu_x * grid_betas.slice(i)) + mean(x_test * grid_betas.slice(i), 1);
+    predictions.slice(i) =  mu_y + x_test * grid_betas.slice(i);
+    predictions.slice(i).each_row() -= mu_x * grid_betas.slice(i);
   }
   return(predictions);
 }
@@ -127,7 +130,7 @@ void Cycling(const arma::mat & x,
     old_coef = out_beta(j, group);
     out_beta(j, group) = 0;
     // Current residuals
-    resid_corr = (1 / n) * dot(x.col(j), current_res.col(group)) + old_coef;
+    resid_corr = dot(x.col(j), current_res.col(group) / n) + old_coef;
     // Update
     out_beta(j, group) = Soft_Thresholding(resid_corr, thresh[j]) / stdz;
     if (out_beta(j, group) != old_coef){
@@ -146,7 +149,6 @@ void Ensemble_EN_Solver(const arma::mat & x,
                         const arma::uword & num_groups,
                         const double & tolerance,
                         const arma::uword & max_iter,
-                        const double & sd_y,
                         arma::mat & current_res,
                         arma::mat & beta){
   // Solves ensembles EN function for fixed penalty terms. Assumes x and y
@@ -164,17 +166,14 @@ void Ensemble_EN_Solver(const arma::mat & x,
   // # Output
   // beta: slopes
   // current_res: residuals
-  double n = x.n_rows;
   arma::uword p = x.n_cols;
   arma::mat thresh = zeros(p, 1);
   double stdz = 0;
   double conv_crit = 1;
   arma::uword iteration = 0;
   arma::mat beta_old = zeros(p, num_groups);
-  double null_RSS = 0;
   
   beta_old = beta;
-  null_RSS = (1 / n) * accu(square(y)) * pow(sd_y, 2);
   stdz = 1 + lambda_sparsity * (1 - alpha);
   // Do one cycle to start with
   iteration += 1;
@@ -186,7 +185,7 @@ void Ensemble_EN_Solver(const arma::mat & x,
   }
   beta_old = beta;
   // cout << '\n' << objective_new << '\n';
-  while((conv_crit > (tolerance * null_RSS)) & (iteration <= max_iter)){
+  while((conv_crit > tolerance) & (iteration <= max_iter)){
     iteration += 1;
      for (arma::uword group = 0; group < num_groups; group++){
        // Update penalty
@@ -259,7 +258,7 @@ arma::cube Ensemble_EN_Grid(const arma::mat & x,
       // Use the solver. Iterations start at beta_old_grid. Output
       // is written to beta_old_grid, residuals are updated in current_res
       Ensemble_EN_Solver(x_std, y_std, lambdas_grid[i], lambda_fixed,
-                        alpha, num_groups, tolerance, max_iter, sd_y, current_res, beta_old_grid);
+                        alpha, num_groups, tolerance, max_iter, current_res, beta_old_grid);
       out_betas.slice(i) = beta_old_grid;
       // De-standardization of the beta coefficients
       out_betas.slice(i).each_col() /= (sd_x.t());
@@ -269,7 +268,7 @@ arma::cube Ensemble_EN_Grid(const arma::mat & x,
         // Use the solver. Iterations start at beta_old_grid. 
         // Output is written to beta_old_grid
         Ensemble_EN_Solver(x_std, y_std, lambda_fixed, lambdas_grid[i],
-                          alpha, num_groups, tolerance, max_iter, sd_y, current_res, beta_old_grid);
+                          alpha, num_groups, tolerance, max_iter, current_res, beta_old_grid);
         out_betas.slice(i) = beta_old_grid;
         // De-standardization f the beta coefficients
         out_betas.slice(i).each_col() /= (sd_x.t());
@@ -380,7 +379,7 @@ arma::uvec Set_Diff(const arma::uvec & big,
   zeros = find(test != 0);
   return(zeros);
 }
-
+// [[Rcpp::export]]
 arma::vec CV_Ensemble_EN(const arma::mat & x,
                          const arma::vec & y,
                          const arma::uword & which_lambda,
@@ -424,12 +423,12 @@ arma::vec CV_Ensemble_EN(const arma::mat & x,
     betas = Ensemble_EN_Grid(x.rows(train), y.rows(train), which_lambda,
                              lambdas_grid, lambda_fixed, alpha, num_groups,
                              tolerance, max_iter);
-    arma::mat preds = Prediction_Grid(x.rows(test), x.rows(train), y.rows(train), betas);
+    arma::cube preds = Prediction_Grid(x.rows(test), x.rows(train), y.rows(train), betas);
+    arma::mat preds_ave = mean(preds, 1);
     for(arma::uword i = 0; i < num_lambdas; i++){
-      mses.at(i, fold) = accu(square(y.rows(test) - preds.col(i)));
+      mses.at(i, fold) = accu(square(y.rows(test)/sqrt(n) - preds_ave.col(i)/sqrt(n)));
     }
   }
-  mses /= n;
   arma::vec out = sum(mses, 1);
   return(out);
 }
